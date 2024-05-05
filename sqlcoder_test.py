@@ -61,7 +61,7 @@ class Hf_sqlcoder(VannaBase):
         **kwargs,
     ):
 
-        prompt = prompt_template.replace("$QUESTION_TEMPLATE", f"{question}\n\n")
+        prompt = prompt_template.replace("$QUESTION_TEMPLATE", f"{question}")
         prompt = self.add_ddl_to_prompt(prompt, ddl_list, max_tokens=14000)
         ##TO-DO: Add sample queries and documentation according to the prompt guidelines of sql-coder
 
