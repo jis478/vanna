@@ -36,14 +36,20 @@ class Hf_sqlcoder(VannaBase):
     def add_ddl_to_prompt(
         self, prompt: str, ddl_list: list[str], max_tokens: int = 14000
     ) -> str:
+
+        total_ddl = ""
+
         if len(ddl_list) > 0:
             for ddl in ddl_list:
                 if (
                     self.str_to_approx_token_count(prompt)
+                    + self.str_to_approx_token_count(total_ddl)
                     + self.str_to_approx_token_count(ddl)
                     < max_tokens
                 ):
-                    prompt = prompt.replace("$SCHEMA_TEMPLATE", f"{ddl}\n\n")
+                    total_ddl += f"{ddl}\n"
+
+        prompt.replace("$SCHEMA_TEMPLATE", f"{total_ddl}\n\n")
 
         return prompt
 
