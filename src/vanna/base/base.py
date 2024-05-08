@@ -1012,6 +1012,85 @@ class VannaBase(ABC):
         self.run_sql_is_set = True
         self.run_sql = run_sql_mysql
 
+    def connect_to_clickhouse(
+            self,
+            host: str = None,
+            dbname: str = None,
+            user: str = None,
+            password: str = None,
+            port: int = None,
+    ):
+
+        try:
+            from clickhouse_driver import connect
+        except ImportError:
+            raise DependencyError(
+                "You need to install required dependencies to execute this method,"
+                " run command: \npip install clickhouse-driver"
+            )
+
+        if not host:
+            host = os.getenv("HOST")
+
+        if not host:
+            raise ImproperlyConfigured("Please set your ClickHouse host")
+
+        if not dbname:
+            dbname = os.getenv("DATABASE")
+
+        if not dbname:
+            raise ImproperlyConfigured("Please set your ClickHouse database")
+
+        if not user:
+            user = os.getenv("USER")
+
+        if not user:
+            raise ImproperlyConfigured("Please set your ClickHouse user")
+
+        if not password:
+            password = os.getenv("PASSWORD")
+
+        if not password:
+            raise ImproperlyConfigured("Please set your ClickHouse password")
+
+        if not port:
+            port = os.getenv("PORT")
+
+        if not port:
+            raise ImproperlyConfigured("Please set your ClickHouse port")
+
+        conn = None
+
+        try:
+            conn = connect(host=host,
+                                   user=user,
+                                   password=password,
+                                   database=dbname,
+                                   port=port,
+                                  )
+            print(conn)
+        except Exception as e:
+            raise ValidationError(e)
+
+        def run_sql_clickhouse(sql: str) -> Union[pd.DataFrame, None]:
+            if conn:
+                try:
+                  cs = conn.cursor()
+                  cs.execute(sql)
+                  results = cs.fetchall()
+
+                  # Create a pandas dataframe from the results
+                  df = pd.DataFrame(
+                    results, columns=[desc[0] for desc in cs.description]
+                  )
+                  return df
+
+                except Exception as e:
+                    raise e
+
+        self.run_sql_is_set = True
+        self.run_sql = run_sql_clickhouse
+
     def connect_to_oracle(
     self,
     user: str = None,
@@ -1146,19 +1225,14 @@ class VannaBase(ABC):
 
         conn = None
 
-        try:
-            conn = bigquery.Client(project=project_id)
-        except:
-            print("Could not found any google cloud implicit credentials")
-
-        if cred_file_path:
+        if not cred_file_path:
+            try:
+                conn = bigquery.Client(project=project_id)
+            except:
+                print("Could not found any google cloud implicit credentials")
+        else:
             # Validate file path and pemissions
             validate_config_path(cred_file_path)
-        else:
-            if not conn:
-                raise ValidationError(
-                    "Pleae provide a service account credentials json file"
-                )
 
         if not conn:
             with open(cred_file_path, "r") as f:
@@ -1287,6 +1361,216 @@ class VannaBase(ABC):
         self.dialect = "T-SQL / Microsoft SQL Server"
         self.run_sql = run_sql_mssql
         self.run_sql_is_set = True
+    def connect_to_presto(
+      self,
+      host: str,
+      catalog: str = 'hive',
+      schema: str = 'default',
+      user: str = None,
+      password: str = None,
+      port: int = None,
+      combined_pem_path: str = None,
+      protocol: str = 'https',
+      requests_kwargs: dict = None
+    ):
+      """
+        Connect to a Presto database using the specified parameters.
+
+        Args:
+            host (str): The host address of the Presto database.
+            catalog (str): The catalog to use in the Presto environment.
+            schema (str): The schema to use in the Presto environment.
+            user (str): The username for authentication.
+            password (str): The password for authentication.
+            port (int): The port number for the Presto connection.
+            combined_pem_path (str): The path to the combined pem file for SSL connection.
+            protocol (str): The protocol to use for the connection (default is 'https').
+            requests_kwargs (dict): Additional keyword arguments for requests.
+
+        Raises:
+            DependencyError: If required dependencies are not installed.
+            ImproperlyConfigured: If essential configuration settings are missing.
+
+        Returns:
+            None
+      """
+      try:
+        from pyhive import presto
+      except ImportError:
+        raise DependencyError(
+          "You need to install required dependencies to execute this method,"
+          " run command: \npip install pyhive"
+        )
+
+      if not host:
+        host = os.getenv("PRESTO_HOST")
+
+      if not host:
+        raise ImproperlyConfigured("Please set your presto host")
+
+      if not catalog:
+        catalog = os.getenv("PRESTO_CATALOG")
+
+      if not catalog:
+        raise ImproperlyConfigured("Please set your presto catalog")
+
+      if not user:
+        user = os.getenv("PRESTO_USER")
+
+      if not user:
+        raise ImproperlyConfigured("Please set your presto user")
+
+      if not password:
+        password = os.getenv("PRESTO_PASSWORD")
+
+      if not port:
+        port = os.getenv("PRESTO_PORT")
+
+      if not port:
+        raise ImproperlyConfigured("Please set your presto port")
+
+      conn = None
+
+      try:
+        if requests_kwargs is None and combined_pem_path is not None:
+          # use the combined pem file to verify the SSL connection
+          requests_kwargs = {
+            'verify': combined_pem_path,  # 使用转换后得到的 PEM 文件进行 SSL 验证
+          }
+        conn = presto.Connection(host=host,
+                                 username=user,
+                                 password=password,
+                                 catalog=catalog,
+                                 schema=schema,
+                                 port=port,
+                                 protocol=protocol,
+                                 requests_kwargs=requests_kwargs)
+      except presto.Error as e:
+        raise ValidationError(e)
+
+      def run_sql_presto(sql: str) -> Union[pd.DataFrame, None]:
+        if conn:
+          try:
+            sql = sql.rstrip()
+            # fix for a known problem with presto db where an extra ; will cause an error.
+            if sql.endswith(';'):
+                sql = sql[:-1]
+            cs = conn.cursor()
+            cs.execute(sql)
+            results = cs.fetchall()
+
+            # Create a pandas dataframe from the results
+            df = pd.DataFrame(
+              results, columns=[desc[0] for desc in cs.description]
+            )
+            return df
+
+          except presto.Error as e:
+            print(e)
+            raise ValidationError(e)
+
+          except Exception as e:
+            print(e)
+            raise e
+
+      self.run_sql_is_set = True
+      self.run_sql = run_sql_presto
+
+    def connect_to_hive(
+      self,
+      host: str = None,
+      dbname: str = 'default',
+      user: str = None,
+      password: str = None,
+      port: int = None,
+      auth: str = 'CUSTOM'
+    ):
+      """
+        Connect to a Hive database. This is just a helper function to set [`vn.run_sql`][vanna.base.base.VannaBase.run_sql]
+        Connect to a Hive database. This is just a helper function to set [`vn.run_sql`][vanna.base.base.VannaBase.run_sql]
+
+        Args:
+            host (str): The host of the Hive database.
+            dbname (str): The name of the database to connect to.
+            user (str): The username to use for authentication.
+            password (str): The password to use for authentication.
+            port (int): The port to use for the connection.
+            auth (str): The authentication method to use.
+
+        Returns:
+            None
+      """
+
+      try:
+        from pyhive import hive
+      except ImportError:
+        raise DependencyError(
+          "You need to install required dependencies to execute this method,"
+          " run command: \npip install pyhive"
+        )
+
+      if not host:
+        host = os.getenv("HIVE_HOST")
+
+      if not host:
+        raise ImproperlyConfigured("Please set your hive host")
+
+      if not dbname:
+        dbname = os.getenv("HIVE_DATABASE")
+
+      if not dbname:
+        raise ImproperlyConfigured("Please set your hive database")
+
+      if not user:
+        user = os.getenv("HIVE_USER")
+
+      if not user:
+        raise ImproperlyConfigured("Please set your hive user")
+
+      if not password:
+        password = os.getenv("HIVE_PASSWORD")
+
+      if not port:
+        port = os.getenv("HIVE_PORT")
+
+      if not port:
+        raise ImproperlyConfigured("Please set your hive port")
+
+      conn = None
+
+      try:
+        conn = hive.Connection(host=host,
+                               username=user,
+                               password=password,
+                               database=dbname,
+                               port=port,
+                               auth=auth)
+      except hive.Error as e:
+        raise ValidationError(e)
+
+      def run_sql_hive(sql: str) -> Union[pd.DataFrame, None]:
+        if conn:
+          try:
+            cs = conn.cursor()
+            cs.execute(sql)
+            results = cs.fetchall()
+
+            # Create a pandas dataframe from the results
+            df = pd.DataFrame(
+              results, columns=[desc[0] for desc in cs.description]
+            )
+            return df
+
+          except hive.Error as e:
+            print(e)
+            raise ValidationError(e)
+
+          except Exception as e:
+            print(e)
+            raise e
+
+      self.run_sql_is_set = True
+      self.run_sql = run_sql_hive
 
     def run_sql(self, sql: str, **kwargs) -> pd.DataFrame:
         """
