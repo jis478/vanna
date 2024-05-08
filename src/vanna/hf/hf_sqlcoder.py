@@ -1,20 +1,12 @@
-import logging
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-from vanna.base import VannaBase
-from vanna.chromadb.chromadb_vector import ChromaDB_VectorStore
-from vanna.flask import VannaFlaskApp
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s %(levelname)s %(message)s",
-    datefmt="%Y%m%d %H%M%S",
-)
+from ..base import VannaBase
 
 
 class Hf_sqlcoder(VannaBase):
     def __init__(self, config=None):
-        model_name = config.get("model_name", None)
+        model_name = self.config.get("model_name", None)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -47,9 +39,8 @@ class Hf_sqlcoder(VannaBase):
                     + self.str_to_approx_token_count(ddl)
                     < max_tokens
                 ):
-                    total_ddl += f"{ddl}\n"
-
-        prompt.replace("$SCHEMA_TEMPLATE", f"{total_ddl}\n\n")
+                    total_ddl += f"\n    {ddl}"
+        prompt = prompt.replace("$SCHEMA_TEMPLATE", f"{total_ddl}")
 
         return prompt
 
@@ -59,11 +50,10 @@ class Hf_sqlcoder(VannaBase):
         question: str,
         ddl_list: list,
         **kwargs,
-    ):
+    ) -> str:
 
         prompt = prompt_template.replace("$QUESTION_TEMPLATE", f"{question}")
         prompt = self.add_ddl_to_prompt(prompt, ddl_list, max_tokens=14000)
-        ##TO-DO: Add sample queries and documentation according to the prompt guidelines of sql-coder
 
         return prompt
 
@@ -78,10 +68,10 @@ class Hf_sqlcoder(VannaBase):
             ddl_list=ddl_list,
             **kwargs,
         )
-        self.log(prompt)
-        llm_response = self.submit_prompt(prompt, **kwargs)
-        self.log(llm_response)
-        return llm_response
+        self.log(title="SQL Prompt", message=prompt)
+        sql = self.submit_prompt(prompt, **kwargs)
+        self.log(title="LLM Response", message=sql)
+        return sql
 
     def submit_prompt(self, prompt: str, **kwargs) -> str:
 
@@ -95,7 +85,7 @@ class Hf_sqlcoder(VannaBase):
             return_full_text=False,  # added return_full_text parameter to prevent splitting issues with prompt
             num_beams=5,  # do beam search with 5 beams for high quality results
         )
-        generated_query = (
+        response = (
             pipe(
                 prompt,
                 num_return_sequences=1,
@@ -107,40 +97,4 @@ class Hf_sqlcoder(VannaBase):
             .strip()
             + ";"
         )
-        return generated_query
-
-
-class MyVanna(ChromaDB_VectorStore, Hf_sqlcoder):
-    def __init__(self, config=None):
-        ChromaDB_VectorStore.__init__(self, config=config)
-        Hf_sqlcoder.__init__(self, config=config)
-
-
-config = {
-    "model_name": "defog/sqlcoder-7b-2",
-    "prompt_template": """
-    ### Task
-    Generate a SQL query to answer [QUESTION] $QUESTION_TEMPLATE [/QUESTION]
-
-    ### Instructions
-    If you cannot answer the question with the available database schema, return 'I do not know'
-    
-    ### Database Schema
-    The query will run on a database with the following schema:
-    $SCHEMA_TEMPLATE
-
-    ### Answer
-    Given the database schema, here is the SQL query that answers [QUESTION] $QUESTION_TEMPLATE [/QUESTION]
-    [SQL]
-    """,
-}
-
-vn = MyVanna(config=config)
-vn.connect_to_sqlite("gw_comments.sqlite")
-df_ddl = vn.run_sql("SELECT type, sql FROM sqlite_master WHERE sql is not null")
-for ddl in df_ddl["sql"].to_list():
-    vn.train(ddl=ddl)
-app = VannaFlaskApp(vn)
-app.run(host="0.0.0.0", port=7080)
-
-# TODO: CHECK SQL-CODER AND VANNA schema, question, and OUTPUTS. ARE THEY SAME? https://github.com/defog-ai/sqlcoder/blob/main/metadata.sql
+        return response
