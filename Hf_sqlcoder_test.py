@@ -16,24 +16,7 @@ class MyVanna(ChromaDB_VectorStore, Hf_sqlcoder):
         Hf_sqlcoder.__init__(self, config=config)
 
 
-config = {
-    "model_name": "defog/sqlcoder-7b-2",
-    "prompt_template": """
-    ### Task
-    Generate a SQL query to answer [QUESTION] $QUESTION_TEMPLATE [/QUESTION]
-    
-    ### Instructions
-    - If you cannot answer the question with the available database schema, return 'I do not know'
-    
-    ### Database Schema
-    The query will run on a database with the following schema:
-    $SCHEMA_TEMPLATE
-
-    ### Answer
-    Given the database schema, here is the SQL query that answers [QUESTION] $QUESTION_TEMPLATE [/QUESTION]
-    [SQL]
-    """,
-}
+config = {"model_name": "defog/sqlcoder-7b-2"}
 
 vn = MyVanna(config=config)
 # vn.connect_to_sqlite("sample.sqlite")

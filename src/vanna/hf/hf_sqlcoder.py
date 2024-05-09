@@ -59,7 +59,21 @@ class Hf_sqlcoder(VannaBase):
 
     def generate_sql(self, question: str, **kwargs) -> str:
 
-        prompt_template = self.config.get("prompt_template", None)
+        prompt_template = """
+        ### Task
+        Generate a SQL query to answer [QUESTION] $QUESTION_TEMPLATE [/QUESTION]
+    
+        ### Instructions
+        - If you cannot answer the question with the available database schema, return 'I do not know'
+    
+        ### Database Schema
+        The query will run on a database with the following schema:
+        $SCHEMA_TEMPLATE
+
+        ### Answer
+        Given the database schema, here is the SQL query that answers [QUESTION] $QUESTION_TEMPLATE [/QUESTION]
+        [SQL] 
+        """
 
         ddl_list = self.get_related_ddl(question, **kwargs)
         prompt = self.get_sql_prompt(
